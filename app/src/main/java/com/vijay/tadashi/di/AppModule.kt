@@ -2,6 +2,8 @@ package com.vijay.tadashi.di
 
 import android.content.Context
 import com.vijay.tadashi.core.logger.Logger
+import com.vijay.tadashi.core.voice.SpeechRecognizerManager
+import com.vijay.tadashi.core.voice.TextToSpeechManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -20,4 +22,14 @@ object AppModule {
     @Provides
     @Singleton
     fun provideApplicationContext(@ApplicationContext context: Context): Context = context
+
+    @Provides
+    @Singleton
+    fun provideSpeechRecognizerManager(@ApplicationContext context: Context): SpeechRecognizerManager =
+        SpeechRecognizerManager(context)
+
+    @Provides
+    @Singleton
+    fun provideTextToSpeechManager(@ApplicationContext context: Context): TextToSpeechManager =
+        TextToSpeechManager(context)
 }
