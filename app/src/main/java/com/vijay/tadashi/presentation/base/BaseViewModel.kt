@@ -38,7 +38,7 @@ abstract class BaseViewModel<S, E, A>(initialState: S) : ViewModel() {
         }
     }
 
-    protected fun sendAction(action: A) {
+    fun sendAction(action: A) {
         viewModelScope.launch {
             _action.emit(action)
         }
