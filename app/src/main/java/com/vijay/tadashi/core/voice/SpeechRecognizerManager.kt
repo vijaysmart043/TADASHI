@@ -65,10 +65,7 @@ class SpeechRecognizerManager(
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
-            val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-            if (!matches.isNullOrEmpty()) {
-                onResult?.invoke(matches[0])
-            }
+            // Do nothing - only use onResults()
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) {
@@ -96,7 +93,6 @@ class SpeechRecognizerManager(
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
 
         speechRecognizer?.startListening(intent)

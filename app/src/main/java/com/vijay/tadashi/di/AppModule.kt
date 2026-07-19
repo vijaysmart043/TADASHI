@@ -1,6 +1,8 @@
 package com.vijay.tadashi.di
 
 import android.content.Context
+import com.vijay.tadashi.core.ai.AssistantEngine
+import com.vijay.tadashi.core.ai.RuleBasedAssistantEngine
 import com.vijay.tadashi.core.logger.Logger
 import com.vijay.tadashi.core.voice.SpeechRecognizerManager
 import com.vijay.tadashi.core.voice.TextToSpeechManager
@@ -32,4 +34,8 @@ object AppModule {
     @Singleton
     fun provideTextToSpeechManager(@ApplicationContext context: Context): TextToSpeechManager =
         TextToSpeechManager(context)
+
+    @Provides
+    @Singleton
+    fun provideAssistantEngine(): AssistantEngine = RuleBasedAssistantEngine()
 }
