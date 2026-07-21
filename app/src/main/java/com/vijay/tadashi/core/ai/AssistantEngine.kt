@@ -1,5 +1,7 @@
 package com.vijay.tadashi.core.ai
 
+import com.vijay.tadashi.core.ai.conversation.ConversationHistory
+
 /**
  * Abstraction used by the presentation layer to generate an assistant response.
  *
@@ -8,9 +10,11 @@ package com.vijay.tadashi.core.ai
  */
 interface AssistantEngine {
     /**
-     * Generates an assistant response for the given input.
+     * Generates an assistant response using the prior conversation [history] and the
+     * [latestUserMessage] as the next turn.
      */
     suspend fun generateResponse(
-        input: String
+        history: ConversationHistory,
+        latestUserMessage: String
     ): AIResult
 }

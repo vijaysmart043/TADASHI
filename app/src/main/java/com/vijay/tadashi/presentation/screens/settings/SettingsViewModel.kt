@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.vijay.tadashi.core.ai.AIConfiguration
 import com.vijay.tadashi.core.ai.AIConfigurationStore
 import com.vijay.tadashi.core.ai.AIProvider
+import com.vijay.tadashi.core.ai.conversation.ConversationHistory
 import com.vijay.tadashi.core.ai.repository.AIRepository
 import com.vijay.tadashi.presentation.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -104,7 +105,8 @@ class SettingsViewModel @Inject constructor(
 
             val result = aiRepository.generateResponse(
                 provider = AIProvider.GEMINI,
-                input = "Reply with OK.",
+                history = ConversationHistory(),
+                latestUserMessage = "Reply with OK.",
                 configuration = configuration
             )
 

@@ -1,6 +1,7 @@
 package com.vijay.tadashi.core.ai
 
 import android.util.Log
+import com.vijay.tadashi.core.ai.conversation.ConversationHistory
 import javax.inject.Inject
 
 /**
@@ -14,19 +15,28 @@ class ProviderAssistantEngine @Inject constructor(
     private val geminiAssistantEngine: GeminiAssistantEngine
 ) : AssistantEngine {
 
-    override suspend fun generateResponse(input: String): AIResult {
+    override suspend fun generateResponse(
+        history: ConversationHistory,
+        latestUserMessage: String
+    ): AIResult {
         val provider = configurationStore.getConfiguration().selectedProvider
         Log.d(TAG, "Selected provider: $provider")
 
         return when (provider) {
             AIProvider.RULE_BASED -> {
                 Log.d(TAG, "Engine selected: RuleBasedAssistantEngine")
-                ruleBasedAssistantEngine.generateResponse(input)
+                ruleBasedAssistantEngine.generateResponse(
+                    history = history,
+                    latestUserMessage = latestUserMessage
+                )
             }
 
             AIProvider.GEMINI -> {
                 Log.d(TAG, "Engine selected: GeminiAssistantEngine")
-                geminiAssistantEngine.generateResponse(input)
+                geminiAssistantEngine.generateResponse(
+                    history = history,
+                    latestUserMessage = latestUserMessage
+                )
             }
 
             AIProvider.OPENAI,

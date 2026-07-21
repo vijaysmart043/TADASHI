@@ -141,13 +141,11 @@ object AppModule {
     @Singleton
     fun provideGeminiService(
         api: GeminiApi,
-        json: Json,
-        mapper: com.vijay.tadashi.core.ai.gemini.network.GeminiMapper
+        json: Json
     ): GeminiService {
         return GeminiService(
             api = api,
-            json = json,
-            mapper = mapper
+            json = json
         )
     }
 

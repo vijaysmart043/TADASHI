@@ -15,8 +15,7 @@ import javax.inject.Inject
  */
 class GeminiService @Inject constructor(
     private val api: GeminiApi,
-    private val json: Json,
-    private val mapper: GeminiMapper
+    private val json: Json
 ) {
     /**
      * Executes a Gemini "generateContent" request for the configured model.
@@ -24,7 +23,7 @@ class GeminiService @Inject constructor(
      * This method never throws; it returns [GeminiServiceResult] representing success/failure.
      */
     suspend fun generateContent(
-        input: String,
+        request: GeminiGenerateContentRequest,
         configuration: AIConfiguration
     ): GeminiServiceResult {
         val apiKey = configuration.apiKey.trim()
@@ -36,11 +35,6 @@ class GeminiService @Inject constructor(
         if (modelName.isBlank()) {
             return GeminiServiceResult.Error("Gemini model name is missing")
         }
-
-        val request = mapper.toRequest(
-            input = input,
-            configuration = configuration
-        )
 
         val startMs = System.currentTimeMillis()
         Log.d(TAG, "Request started (model=$modelName)")

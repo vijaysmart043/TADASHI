@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vijay.tadashi.core.ai.AssistantEngine
 import com.vijay.tadashi.core.ai.AIState
+import com.vijay.tadashi.core.ai.conversation.ConversationHistory
+import com.vijay.tadashi.core.ai.conversation.ConversationManager
 import com.vijay.tadashi.core.voice.SpeechRecognizerManager
 import com.vijay.tadashi.core.voice.TextToSpeechManager
 import com.vijay.tadashi.presentation.chat.ChatMessage
@@ -25,7 +27,8 @@ import javax.inject.Inject
 class VoiceViewModel @Inject constructor(
     private val speechRecognizerManager: SpeechRecognizerManager,
     private val textToSpeechManager: TextToSpeechManager,
-    private val assistantEngine: AssistantEngine
+    private val assistantEngine: AssistantEngine,
+    private val conversationManager: ConversationManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(VoiceUiState())
@@ -89,6 +92,8 @@ class VoiceViewModel @Inject constructor(
         Log.d("TADASHI-VOICE", "submitUserMessage() called with: $text")
         if (text.isBlank()) return
 
+        conversationManager.addUserMessage(text)
+
         val userMessage = ChatMessage(text = text, sender = Sender.USER)
         val updatedChatHistory = _uiState.value.chatHistory + userMessage
         _uiState.value = _uiState.value.copy(chatHistory = updatedChatHistory, userInput = "")
@@ -96,10 +101,19 @@ class VoiceViewModel @Inject constructor(
         viewModelScope.launch {
             _aiState.value = AIState.Loading
 
-            val result = assistantEngine.generateResponse(text)
+            val currentHistory = conversationManager.getHistory().messages
+            val historyWithoutLatest = ConversationHistory(
+                messages = if (currentHistory.isNotEmpty()) currentHistory.dropLast(1) else emptyList()
+            )
+
+            val result = assistantEngine.generateResponse(
+                history = historyWithoutLatest,
+                latestUserMessage = text
+            )
 
             if (result.success) {
                 Log.d("TADASHI-VOICE", "Assistant response: ${result.text}")
+                conversationManager.addAssistantMessage(result.text)
                 val assistantMessage = ChatMessage(text = result.text, sender = Sender.ASSISTANT)
                 _uiState.value = _uiState.value.copy(chatHistory = _uiState.value.chatHistory + assistantMessage)
 

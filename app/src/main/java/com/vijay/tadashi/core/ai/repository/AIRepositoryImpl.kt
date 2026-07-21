@@ -4,6 +4,8 @@ import android.util.Log
 import com.vijay.tadashi.core.ai.AIConfiguration
 import com.vijay.tadashi.core.ai.AIProvider
 import com.vijay.tadashi.core.ai.AIResult
+import com.vijay.tadashi.core.ai.conversation.ContextBuilder
+import com.vijay.tadashi.core.ai.conversation.ConversationHistory
 import com.vijay.tadashi.core.ai.gemini.network.GeminiMapper
 import com.vijay.tadashi.core.ai.gemini.network.GeminiService
 import com.vijay.tadashi.core.ai.gemini.network.GeminiServiceResult
@@ -14,17 +16,20 @@ import javax.inject.Inject
  */
 class AIRepositoryImpl @Inject constructor(
     private val geminiService: GeminiService,
-    private val geminiMapper: GeminiMapper
+    private val geminiMapper: GeminiMapper,
+    private val contextBuilder: ContextBuilder
 ) : AIRepository {
 
     override suspend fun generateResponse(
         provider: AIProvider,
-        input: String,
+        history: ConversationHistory,
+        latestUserMessage: String,
         configuration: AIConfiguration
     ): AIResult {
         return when (provider) {
             AIProvider.GEMINI -> generateGeminiResponse(
-                input = input,
+                history = history,
+                latestUserMessage = latestUserMessage,
                 configuration = configuration
             )
 
@@ -40,12 +45,19 @@ class AIRepositoryImpl @Inject constructor(
     }
 
     private suspend fun generateGeminiResponse(
-        input: String,
+        history: ConversationHistory,
+        latestUserMessage: String,
         configuration: AIConfiguration
     ): AIResult {
+        val request = contextBuilder.buildGeminiRequest(
+            history = history,
+            latestUserMessage = latestUserMessage,
+            configuration = configuration
+        )
+
         return when (
             val result = geminiService.generateContent(
-                input = input,
+                request = request,
                 configuration = configuration
             )
         ) {

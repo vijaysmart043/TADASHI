@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class GeminiGenerateContentRequest(
+    @SerialName("systemInstruction")
+    val systemInstruction: GeminiContent? = null,
     val contents: List<GeminiContent>,
     @SerialName("generationConfig")
     val generationConfig: GeminiGenerationConfig? = null
@@ -44,4 +46,3 @@ data class GeminiUsageMetadata(
     @SerialName("totalTokenCount")
     val totalTokenCount: Int? = null
 )
-

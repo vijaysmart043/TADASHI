@@ -1,5 +1,6 @@
 package com.vijay.tadashi.core.ai
 
+import com.vijay.tadashi.core.ai.conversation.ConversationHistory
 import com.vijay.tadashi.core.ai.repository.AIRepository
 import javax.inject.Inject
 
@@ -11,12 +12,16 @@ class GeminiAssistantEngine @Inject constructor(
     private val aiRepository: AIRepository
 ) : AssistantEngine {
 
-    override suspend fun generateResponse(input: String): AIResult {
+    override suspend fun generateResponse(
+        history: ConversationHistory,
+        latestUserMessage: String
+    ): AIResult {
         val configuration = configurationStore.getConfiguration()
 
         return aiRepository.generateResponse(
             provider = AIProvider.GEMINI,
-            input = input,
+            history = history,
+            latestUserMessage = latestUserMessage,
             configuration = configuration
         )
     }
