@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vijay.tadashi.core.ai.AssistantEngine
+import com.vijay.tadashi.core.ai.AIState
 import com.vijay.tadashi.core.voice.SpeechRecognizerManager
 import com.vijay.tadashi.core.voice.TextToSpeechManager
 import com.vijay.tadashi.presentation.chat.ChatMessage
@@ -16,6 +17,11 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
+/**
+ * Coordinates the voice conversation pipeline.
+ *
+ * The view model depends only on [AssistantEngine] and remains provider-agnostic.
+ */
 class VoiceViewModel @Inject constructor(
     private val speechRecognizerManager: SpeechRecognizerManager,
     private val textToSpeechManager: TextToSpeechManager,
@@ -27,6 +33,9 @@ class VoiceViewModel @Inject constructor(
 
     private val _events = MutableStateFlow<VoiceEvents?>(null)
     val events: StateFlow<VoiceEvents?> = _events.asStateFlow()
+
+    private val _aiState = MutableStateFlow<AIState>(AIState.Idle)
+    val aiState: StateFlow<AIState> = _aiState.asStateFlow()
 
     init {
         setupSpeechRecognizerCallbacks()
@@ -73,6 +82,9 @@ class VoiceViewModel @Inject constructor(
         speechRecognizerManager.stopListening()
     }
 
+    /**
+     * Adds a user message to the conversation and asynchronously generates the assistant response.
+     */
     fun submitUserMessage(text: String) {
         Log.d("TADASHI-VOICE", "submitUserMessage() called with: $text")
         if (text.isBlank()) return
@@ -81,13 +93,27 @@ class VoiceViewModel @Inject constructor(
         val updatedChatHistory = _uiState.value.chatHistory + userMessage
         _uiState.value = _uiState.value.copy(chatHistory = updatedChatHistory, userInput = "")
 
-        val assistantResponse = assistantEngine.generateResponse(text)
-        Log.d("TADASHI-VOICE", "Assistant response: $assistantResponse")
-        val assistantMessage = ChatMessage(text = assistantResponse, sender = Sender.ASSISTANT)
-        _uiState.value = _uiState.value.copy(chatHistory = _uiState.value.chatHistory + assistantMessage)
+        viewModelScope.launch {
+            _aiState.value = AIState.Loading
 
-        Log.d("TADASHI-VOICE", "TTS started")
-        textToSpeechManager.speak(assistantResponse)
+            val result = assistantEngine.generateResponse(text)
+
+            if (result.success) {
+                Log.d("TADASHI-VOICE", "Assistant response: ${result.text}")
+                val assistantMessage = ChatMessage(text = result.text, sender = Sender.ASSISTANT)
+                _uiState.value = _uiState.value.copy(chatHistory = _uiState.value.chatHistory + assistantMessage)
+
+                Log.d("TADASHI-VOICE", "TTS started")
+                textToSpeechManager.speak(result.text)
+
+                _aiState.value = AIState.Success(result)
+            } else {
+                val message = result.error ?: "AI request failed"
+                Log.e("TADASHI-VOICE", "Assistant error: $message")
+                _events.value = VoiceEvents.ShowToast(message)
+                _aiState.value = AIState.Error(message = message, provider = result.provider)
+            }
+        }
     }
 
     fun onUserInputChange(text: String) {
