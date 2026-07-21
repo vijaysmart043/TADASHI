@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -17,9 +19,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.vijay.tadashi.presentation.components.BasicButton
-import com.vijay.tadashi.presentation.components.ScreenTitle
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -66,6 +70,19 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                }
+            )
+        },
         snackbarHost = {
             SnackbarHost(hostState = snackbarHostState)
         }
@@ -77,8 +94,6 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.Top
         ) {
-            ScreenTitle(title = "Settings")
-
             Spacer(modifier = Modifier.height(24.dp))
 
             var providerExpanded by remember { mutableStateOf(false) }
@@ -130,12 +145,41 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
-                value = uiState.modelName,
-                onValueChange = { viewModel.sendAction(SettingsAction.ModelChanged(it)) },
-                label = { Text("Model") }
-            )
+            var modelExpanded by remember { mutableStateOf(false) }
+
+            ExposedDropdownMenuBox(
+                expanded = modelExpanded,
+                onExpandedChange = { modelExpanded = !modelExpanded }
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(),
+                    value = uiState.modelName,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Model") },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded)
+                    },
+                    colors = OutlinedTextFieldDefaults.colors()
+                )
+
+                ExposedDropdownMenu(
+                    expanded = modelExpanded,
+                    onDismissRequest = { modelExpanded = false }
+                ) {
+                    modelOptions().forEach { model ->
+                        DropdownMenuItem(
+                            text = { Text(model) },
+                            onClick = {
+                                modelExpanded = false
+                                viewModel.sendAction(SettingsAction.ModelChanged(model))
+                            }
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -171,6 +215,14 @@ fun SettingsScreen(
                     onClick = { navController.popBackStack() }
                 )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            BasicButton(
+                modifier = Modifier.fillMaxWidth(),
+                text = "Test Gemini Connection",
+                onClick = { viewModel.sendAction(SettingsAction.TestGeminiConnectionClicked) }
+            )
         }
     }
 }
@@ -180,6 +232,13 @@ private fun providerOptions() = listOf(
     com.vijay.tadashi.core.ai.AIProvider.GEMINI,
     com.vijay.tadashi.core.ai.AIProvider.OPENAI,
     com.vijay.tadashi.core.ai.AIProvider.OLLAMA
+)
+
+private fun modelOptions() = listOf(
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro"
 )
 
 private fun providerLabel(provider: com.vijay.tadashi.core.ai.AIProvider): String {

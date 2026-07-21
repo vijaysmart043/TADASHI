@@ -15,6 +15,8 @@ import com.vijay.tadashi.core.ai.repository.AIRepository
 import com.vijay.tadashi.core.ai.repository.AIRepositoryImpl
 import com.vijay.tadashi.core.voice.SpeechRecognizerManager
 import com.vijay.tadashi.core.voice.TextToSpeechManager
+import android.util.Log
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -22,6 +24,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Response
 import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
@@ -90,6 +94,22 @@ object AppModule {
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val safeUrl = request.url.newBuilder().query(null).build()
+                val startMs = System.currentTimeMillis()
+                Log.d("TADASHI-GEMINI", "HTTP ${request.method} $safeUrl")
+                try {
+                    val response: Response = chain.proceed(request)
+                    val elapsedMs = System.currentTimeMillis() - startMs
+                    Log.d("TADASHI-GEMINI", "HTTP ${response.code} (${elapsedMs}ms) $safeUrl")
+                    response
+                } catch (e: Exception) {
+                    val elapsedMs = System.currentTimeMillis() - startMs
+                    Log.d("TADASHI-GEMINI", "HTTP failed (${elapsedMs}ms) $safeUrl", e)
+                    throw e
+                }
+            }
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
@@ -99,11 +119,13 @@ object AppModule {
     @Provides
     @Singleton
     fun provideRetrofit(
-        okHttpClient: OkHttpClient
+        okHttpClient: OkHttpClient,
+        json: Json
     ): Retrofit {
         return Retrofit.Builder()
             .baseUrl("https://generativelanguage.googleapis.com/")
             .client(okHttpClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
     }
 

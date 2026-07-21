@@ -1,5 +1,6 @@
 package com.vijay.tadashi.core.ai
 
+import android.util.Log
 import javax.inject.Inject
 
 /**
@@ -15,10 +16,19 @@ class ProviderAssistantEngine @Inject constructor(
 
     override suspend fun generateResponse(input: String): AIResult {
         val provider = configurationStore.getConfiguration().selectedProvider
+        Log.d(TAG, "Selected provider: $provider")
 
         return when (provider) {
-            AIProvider.RULE_BASED -> ruleBasedAssistantEngine.generateResponse(input)
-            AIProvider.GEMINI -> geminiAssistantEngine.generateResponse(input)
+            AIProvider.RULE_BASED -> {
+                Log.d(TAG, "Engine selected: RuleBasedAssistantEngine")
+                ruleBasedAssistantEngine.generateResponse(input)
+            }
+
+            AIProvider.GEMINI -> {
+                Log.d(TAG, "Engine selected: GeminiAssistantEngine")
+                geminiAssistantEngine.generateResponse(input)
+            }
+
             AIProvider.OPENAI,
             AIProvider.OLLAMA -> AIResult(
                 text = "",
@@ -28,5 +38,8 @@ class ProviderAssistantEngine @Inject constructor(
             )
         }
     }
-}
 
+    private companion object {
+        private const val TAG = "TADASHI-GEMINI"
+    }
+}

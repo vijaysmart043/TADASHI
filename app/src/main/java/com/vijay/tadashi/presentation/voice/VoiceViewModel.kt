@@ -108,10 +108,20 @@ class VoiceViewModel @Inject constructor(
 
                 _aiState.value = AIState.Success(result)
             } else {
-                val message = result.error ?: "AI request failed"
+                val rawMessage = result.error ?: "AI request failed"
+                val isGeminiApiKeyMissing =
+                    result.provider == com.vijay.tadashi.core.ai.AIProvider.GEMINI &&
+                        rawMessage.contains("api key", ignoreCase = true)
+                val message = if (isGeminiApiKeyMissing) "API key required" else rawMessage
+
                 Log.e("TADASHI-VOICE", "Assistant error: $message")
-                _events.value = VoiceEvents.ShowToast(message)
                 _aiState.value = AIState.Error(message = message, provider = result.provider)
+
+                _events.value = if (isGeminiApiKeyMissing) {
+                    VoiceEvents.NavigateToSettings(message)
+                } else {
+                    VoiceEvents.ShowToast(message)
+                }
             }
         }
     }

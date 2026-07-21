@@ -1,6 +1,7 @@
 package com.vijay.tadashi.core.ai
 
 import android.content.SharedPreferences
+import android.util.Log
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -20,6 +21,7 @@ class EncryptedAIConfigurationStore @Inject constructor(
         val provider = runCatching { AIProvider.valueOf(providerName) }
             .getOrDefault(AIProvider.RULE_BASED)
 
+        Log.d(TAG, "Selected provider (stored): $provider")
         return AIConfiguration(
             selectedProvider = provider,
             apiKey = sharedPreferences.getString(KEY_API_KEY, "") ?: "",
@@ -53,6 +55,7 @@ class EncryptedAIConfigurationStore @Inject constructor(
     }
 
     private companion object {
+        private const val TAG = "TADASHI-GEMINI"
         private const val KEY_PROVIDER = "ai_provider"
         private const val KEY_API_KEY = "ai_api_key"
         private const val KEY_MODEL = "ai_model_name"
@@ -63,4 +66,3 @@ class EncryptedAIConfigurationStore @Inject constructor(
         private const val DEFAULT_MAX_TOKENS = 512
     }
 }
-

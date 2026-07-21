@@ -1,7 +1,5 @@
 package com.vijay.tadashi.core.ai.gemini.network
 
-import okhttp3.RequestBody
-import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.POST
@@ -21,7 +19,6 @@ interface GeminiApi {
     suspend fun generateContent(
         @Path("model") model: String,
         @Query("key") apiKey: String,
-        @Body body: RequestBody
-    ): Response<ResponseBody>
+        @Body body: GeminiGenerateContentRequest
+    ): Response<GeminiGenerateContentResponse>
 }
-

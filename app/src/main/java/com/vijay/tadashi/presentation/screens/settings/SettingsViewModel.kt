@@ -1,9 +1,11 @@
 package com.vijay.tadashi.presentation.screens.settings
 
+import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.vijay.tadashi.core.ai.AIConfiguration
 import com.vijay.tadashi.core.ai.AIConfigurationStore
 import com.vijay.tadashi.core.ai.AIProvider
+import com.vijay.tadashi.core.ai.repository.AIRepository
 import com.vijay.tadashi.presentation.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -15,7 +17,8 @@ import javax.inject.Inject
  * Manages persisted AI provider settings.
  */
 class SettingsViewModel @Inject constructor(
-    private val configurationStore: AIConfigurationStore
+    private val configurationStore: AIConfigurationStore,
+    private val aiRepository: AIRepository
 ) : BaseViewModel<SettingsUiState, SettingsEffect, SettingsAction>(SettingsUiState()) {
 
     init {
@@ -58,6 +61,10 @@ class SettingsViewModel @Inject constructor(
                     SettingsAction.SaveClicked -> {
                         save()
                     }
+
+                    SettingsAction.TestGeminiConnectionClicked -> {
+                        testGeminiConnection()
+                    }
                 }
             }
         }
@@ -78,8 +85,35 @@ class SettingsViewModel @Inject constructor(
             maxTokens = state.value.maxTokens.toInt()
         )
 
+        Log.d(TAG, "Selected provider saved: ${configuration.selectedProvider}")
         configurationStore.saveConfiguration(configuration)
         sendEffect(SettingsEffect.ShowMessage("AI settings saved"))
+    }
+
+    private fun testGeminiConnection() {
+        viewModelScope.launch {
+            val configuration = configurationStore.getConfiguration()
+            if (configuration.apiKey.isBlank()) {
+                sendEffect(SettingsEffect.ShowMessage("API key required"))
+                return@launch
+            }
+            if (configuration.modelName.isBlank()) {
+                sendEffect(SettingsEffect.ShowMessage("Model name is required for GEMINI"))
+                return@launch
+            }
+
+            val result = aiRepository.generateResponse(
+                provider = AIProvider.GEMINI,
+                input = "Reply with OK.",
+                configuration = configuration
+            )
+
+            if (result.success) {
+                sendEffect(SettingsEffect.ShowMessage("✓ Gemini Connected"))
+            } else {
+                sendEffect(SettingsEffect.ShowMessage(result.error ?: "Gemini connection failed"))
+            }
+        }
     }
 
     private fun validate(uiState: SettingsUiState): String? {
@@ -98,6 +132,10 @@ class SettingsViewModel @Inject constructor(
                 null
             }
         }
+    }
+
+    private companion object {
+        private const val TAG = "TADASHI-GEMINI"
     }
 }
 
@@ -140,4 +178,6 @@ sealed interface SettingsAction {
     ) : SettingsAction
 
     data object SaveClicked : SettingsAction
+
+    data object TestGeminiConnectionClicked : SettingsAction
 }

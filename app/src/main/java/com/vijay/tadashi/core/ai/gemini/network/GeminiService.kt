@@ -3,10 +3,7 @@ package com.vijay.tadashi.core.ai.gemini.network
 import android.util.Log
 import com.vijay.tadashi.core.ai.AIConfiguration
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
@@ -45,9 +42,6 @@ class GeminiService @Inject constructor(
             configuration = configuration
         )
 
-        val requestJson = json.encodeToString(JsonObject.serializer(), request.json)
-        val requestBody = requestJson.toRequestBody(JSON_MEDIA_TYPE)
-
         val startMs = System.currentTimeMillis()
         Log.d(TAG, "Request started (model=$modelName)")
 
@@ -55,7 +49,7 @@ class GeminiService @Inject constructor(
             val response = api.generateContent(
                 model = modelName,
                 apiKey = apiKey,
-                body = requestBody
+                body = request
             )
 
             val elapsedMs = System.currentTimeMillis() - startMs
@@ -63,20 +57,22 @@ class GeminiService @Inject constructor(
 
             if (!response.isSuccessful) {
                 val errorMessage = errorMessageForHttpCode(response.code())
-                Log.d(TAG, "HTTP error (code=${response.code()}): $errorMessage")
-                return GeminiServiceResult.Error(errorMessage)
+                val serverMessage = response.errorBody()?.string()
+                val parsedServerMessage = parseServerErrorMessage(serverMessage)
+                val message = if (parsedServerMessage.isNullOrBlank()) {
+                    errorMessage
+                } else {
+                    "$errorMessage: $parsedServerMessage"
+                }
+                Log.d(TAG, "HTTP error (code=${response.code()}): $message")
+                return GeminiServiceResult.Error(message)
             }
 
-            val bodyString = response.body()?.string()
-            if (bodyString.isNullOrBlank()) {
-                return GeminiServiceResult.Error("Gemini returned an empty response body")
-            }
-
-            val rootElement = json.parseToJsonElement(bodyString)
-            val rootObject = rootElement.jsonObject
+            val body = response.body()
+                ?: return GeminiServiceResult.Error("Gemini returned an empty response body")
 
             GeminiServiceResult.Success(
-                response = GeminiResponse(json = rootObject)
+                response = body
             )
         } catch (e: UnknownHostException) {
             Log.d(TAG, "No internet / DNS error", e)
@@ -99,6 +95,16 @@ class GeminiService @Inject constructor(
         }
     }
 
+    private fun parseServerErrorMessage(errorBody: String?): String? {
+        if (errorBody.isNullOrBlank()) return null
+
+        return runCatching {
+            val root = json.parseToJsonElement(errorBody).jsonObject
+            val error = root["error"]?.jsonObject
+            error?.get("message")?.toString()?.trim('"')
+        }.getOrNull()
+    }
+
     private fun errorMessageForHttpCode(code: Int): String {
         return when (code) {
             401 -> "Unauthorized (check your Gemini API key)"
@@ -111,7 +117,6 @@ class GeminiService @Inject constructor(
 
     private companion object {
         private const val TAG = "TADASHI-GEMINI"
-        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }
 
@@ -120,11 +125,10 @@ class GeminiService @Inject constructor(
  */
 sealed interface GeminiServiceResult {
     data class Success(
-        val response: GeminiResponse
+        val response: GeminiGenerateContentResponse
     ) : GeminiServiceResult
 
     data class Error(
         val message: String
     ) : GeminiServiceResult
 }
-

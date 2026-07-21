@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,6 +34,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -49,12 +53,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.vijay.tadashi.core.ai.AIState
 import com.vijay.tadashi.presentation.chat.Sender
-import com.vijay.tadashi.presentation.components.ScreenTitle
 import com.vijay.tadashi.presentation.navigation.Screen
 import com.vijay.tadashi.presentation.voice.VoiceEvents
 import com.vijay.tadashi.presentation.voice.VoiceViewModel
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HomeScreen(
     navController: NavHostController,
     voiceViewModel: VoiceViewModel = hiltViewModel(),
@@ -99,11 +103,40 @@ fun HomeScreen(
                 Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
                 voiceViewModel.onEventConsumed()
             }
+            is VoiceEvents.NavigateToSettings -> {
+                Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+                navController.navigate(Screen.Settings.route) {
+                    launchSingleTop = true
+                }
+                voiceViewModel.onEventConsumed()
+            }
             null -> {}
         }
     }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(text = "TADASHI") },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            navController.navigate(Screen.Settings.route) {
+                                launchSingleTop = true
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings"
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
@@ -136,7 +169,6 @@ fun HomeScreen(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                ScreenTitle(title = "TADASHI")
                 if (uiState.isListening) {
                     Text(
                         text = "Listening...",

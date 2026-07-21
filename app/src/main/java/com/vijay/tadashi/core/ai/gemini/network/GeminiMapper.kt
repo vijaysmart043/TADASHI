@@ -3,14 +3,6 @@ package com.vijay.tadashi.core.ai.gemini.network
 import com.vijay.tadashi.core.ai.AIConfiguration
 import com.vijay.tadashi.core.ai.AIProvider
 import com.vijay.tadashi.core.ai.AIResult
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 
 /**
@@ -23,43 +15,31 @@ class GeminiMapper @Inject constructor() {
     fun toRequest(
         input: String,
         configuration: AIConfiguration
-    ): GeminiRequest {
-        val parts = JsonArray(listOf(JsonObject(mapOf("text" to JsonPrimitive(input)))))
-
-        val content = JsonObject(
-            mapOf(
-                "role" to JsonPrimitive("user"),
-                "parts" to parts
+    ): GeminiGenerateContentRequest {
+        return GeminiGenerateContentRequest(
+            contents = listOf(
+                GeminiContent(
+                    role = "user",
+                    parts = listOf(
+                        GeminiPart(text = input)
+                    )
+                )
+            ),
+            generationConfig = GeminiGenerationConfig(
+                temperature = configuration.temperature,
+                maxOutputTokens = configuration.maxTokens
             )
         )
-
-        val contents = JsonArray(listOf(content))
-
-        val generationConfig = JsonObject(
-            mapOf(
-                "temperature" to JsonPrimitive(configuration.temperature),
-                "maxOutputTokens" to JsonPrimitive(configuration.maxTokens)
-            )
-        )
-
-        val root = JsonObject(
-            mapOf(
-                "contents" to contents,
-                "generationConfig" to generationConfig
-            )
-        )
-
-        return GeminiRequest(json = root)
     }
 
     /**
      * Extracts assistant text and token usage (when available).
      */
     fun toResult(
-        response: GeminiResponse
+        response: GeminiGenerateContentResponse
     ): AIResult {
-        val text = extractText(response.json)
-        val tokensUsed = extractTokenUsage(response.json)
+        val text = extractText(response)
+        val tokensUsed = response.usageMetadata?.totalTokenCount
 
         return if (text.isNullOrBlank()) {
             AIResult(
@@ -79,21 +59,10 @@ class GeminiMapper @Inject constructor() {
         }
     }
 
-    private fun extractText(root: JsonObject): String? {
-        val candidates = root["candidates"] as? JsonArray ?: return null
-        val firstCandidate = candidates.firstOrNull()?.jsonObject ?: return null
-        val content = firstCandidate["content"]?.jsonObject ?: return null
-        val parts = content["parts"]?.jsonArray ?: return null
-        val firstPart = parts.firstOrNull()?.jsonObject ?: return null
-        return firstPart["text"]?.jsonPrimitive?.contentOrNull
+    private fun extractText(response: GeminiGenerateContentResponse): String? {
+        val firstCandidate = response.candidates.firstOrNull() ?: return null
+        val content = firstCandidate.content ?: return null
+        val firstPart = content.parts.firstOrNull() ?: return null
+        return firstPart.text
     }
-
-    private fun extractTokenUsage(root: JsonObject): Int? {
-        val usage = root["usageMetadata"]?.jsonObject ?: return null
-        return usage["totalTokenCount"]?.jsonPrimitive?.intOrNull
-    }
-
-    private val JsonPrimitive.contentOrNull: String?
-        get() = runCatching { content }.getOrNull()
 }
-
