@@ -8,6 +8,8 @@ import com.vijay.tadashi.core.ai.AssistantEngine
 import com.vijay.tadashi.core.ai.AIConfigurationStore
 import com.vijay.tadashi.core.ai.EncryptedAIConfigurationStore
 import com.vijay.tadashi.core.ai.ProviderAssistantEngine
+import com.vijay.tadashi.core.ai.gemini.network.GeminiApi
+import com.vijay.tadashi.core.ai.gemini.network.GeminiService
 import com.vijay.tadashi.core.logger.Logger
 import com.vijay.tadashi.core.ai.repository.AIRepository
 import com.vijay.tadashi.core.ai.repository.AIRepositoryImpl
@@ -18,6 +20,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 @Module
@@ -70,6 +76,58 @@ object AppModule {
     fun provideAIRepository(
         impl: AIRepositoryImpl
     ): AIRepository = impl
+
+    @Provides
+    @Singleton
+    fun provideKotlinxJson(): Json {
+        return Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+        }
+    }
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideRetrofit(
+        okHttpClient: OkHttpClient
+    ): Retrofit {
+        return Retrofit.Builder()
+            .baseUrl("https://generativelanguage.googleapis.com/")
+            .client(okHttpClient)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideGeminiApi(
+        retrofit: Retrofit
+    ): GeminiApi {
+        return retrofit.create(GeminiApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGeminiService(
+        api: GeminiApi,
+        json: Json,
+        mapper: com.vijay.tadashi.core.ai.gemini.network.GeminiMapper
+    ): GeminiService {
+        return GeminiService(
+            api = api,
+            json = json,
+            mapper = mapper
+        )
+    }
 
     @Provides
     @Singleton

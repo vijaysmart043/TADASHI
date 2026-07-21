@@ -43,9 +43,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import com.vijay.tadashi.core.ai.AIState
 import com.vijay.tadashi.presentation.chat.Sender
 import com.vijay.tadashi.presentation.components.ScreenTitle
 import com.vijay.tadashi.presentation.navigation.Screen
@@ -61,6 +63,8 @@ fun HomeScreen(
     val context = LocalContext.current
     val uiState by voiceViewModel.uiState.collectAsStateWithLifecycle()
     val events by voiceViewModel.events.collectAsStateWithLifecycle()
+    val aiState by voiceViewModel.aiState.collectAsStateWithLifecycle()
+    val isThinking = aiState is AIState.Loading
 
     val lazyListState = rememberLazyListState()
     val shouldScrollToEnd by remember { derivedStateOf { uiState.chatHistory.size } }
@@ -103,13 +107,16 @@ fun HomeScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
+                    if (isThinking) return@FloatingActionButton
                     if (uiState.isListening) {
                         voiceViewModel.stopListening()
                     } else {
                         voiceViewModel.startListening()
                     }
                 },
-                modifier = Modifier.size(80.dp),
+                modifier = Modifier
+                    .size(80.dp)
+                    .alpha(if (isThinking) 0.5f else 1f),
                 shape = RoundedCornerShape(50)
             ) {
                 Icon(
@@ -139,6 +146,15 @@ fun HomeScreen(
                         textAlign = TextAlign.Center
                     )
                 }
+            if (isThinking) {
+                Text(
+                    text = "TADASHI is thinking...",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -201,6 +217,7 @@ fun HomeScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 IconButton(
+                    enabled = !isThinking && uiState.userInput.isNotBlank(),
                     onClick = {
                         voiceViewModel.submitUserMessage(uiState.userInput)
                     },

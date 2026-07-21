@@ -1,23 +1,20 @@
 package com.vijay.tadashi.core.ai.repository
 
+import android.util.Log
 import com.vijay.tadashi.core.ai.AIConfiguration
 import com.vijay.tadashi.core.ai.AIProvider
 import com.vijay.tadashi.core.ai.AIResult
-import com.vijay.tadashi.core.ai.gemini.GeminiHttpClient
-import com.vijay.tadashi.core.ai.gemini.GeminiRequestBuilder
-import com.vijay.tadashi.core.ai.gemini.GeminiResponseParser
+import com.vijay.tadashi.core.ai.gemini.network.GeminiMapper
+import com.vijay.tadashi.core.ai.gemini.network.GeminiService
+import com.vijay.tadashi.core.ai.gemini.network.GeminiServiceResult
 import javax.inject.Inject
 
 /**
  * Default implementation of [AIRepository].
- *
- * Phase 3.1 provides only the wiring and request/response scaffolding; real networking will be added
- * in the next phase.
  */
 class AIRepositoryImpl @Inject constructor(
-    private val geminiHttpClient: GeminiHttpClient,
-    private val geminiRequestBuilder: GeminiRequestBuilder,
-    private val geminiResponseParser: GeminiResponseParser
+    private val geminiService: GeminiService,
+    private val geminiMapper: GeminiMapper
 ) : AIRepository {
 
     override suspend fun generateResponse(
@@ -46,16 +43,28 @@ class AIRepositoryImpl @Inject constructor(
         input: String,
         configuration: AIConfiguration
     ): AIResult {
-        val requestBody = geminiRequestBuilder.buildGenerateContentRequest(
-            input = input,
-            configuration = configuration
-        )
+        return when (
+            val result = geminiService.generateContent(
+                input = input,
+                configuration = configuration
+            )
+        ) {
+            is GeminiServiceResult.Success -> {
+                val aiResult = geminiMapper.toResult(result.response)
+                Log.d(TAG, "Tokens used: ${aiResult.tokensUsed ?: -1}")
+                aiResult
+            }
 
-        return AIResult(
-            text = "Gemini Integration Ready",
-            success = true,
-            provider = AIProvider.GEMINI
-        )
+            is GeminiServiceResult.Error -> AIResult(
+                text = "",
+                success = false,
+                error = result.message,
+                provider = AIProvider.GEMINI
+            )
+        }
+    }
+
+    private companion object {
+        private const val TAG = "TADASHI-GEMINI"
     }
 }
-
