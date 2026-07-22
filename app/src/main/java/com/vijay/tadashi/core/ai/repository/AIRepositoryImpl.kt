@@ -9,6 +9,9 @@ import com.vijay.tadashi.core.ai.conversation.ConversationHistory
 import com.vijay.tadashi.core.ai.gemini.network.GeminiMapper
 import com.vijay.tadashi.core.ai.gemini.network.GeminiService
 import com.vijay.tadashi.core.ai.gemini.network.GeminiServiceResult
+import com.vijay.tadashi.core.ai.streaming.StreamingResponse
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import javax.inject.Inject
 
 /**
@@ -40,6 +43,34 @@ class AIRepositoryImpl @Inject constructor(
                 success = false,
                 error = "Provider not available in repository: $provider",
                 provider = provider
+            )
+        }
+    }
+
+    override fun streamResponse(
+        provider: AIProvider,
+        history: ConversationHistory,
+        latestUserMessage: String,
+        configuration: AIConfiguration
+    ): Flow<StreamingResponse> {
+        return when (provider) {
+            AIProvider.GEMINI -> {
+                val request = contextBuilder.buildGeminiRequest(
+                    history = history,
+                    latestUserMessage = latestUserMessage,
+                    configuration = configuration
+                )
+
+                geminiService.generateContentStream(
+                    request = request,
+                    configuration = configuration
+                )
+            }
+
+            AIProvider.OPENAI,
+            AIProvider.OLLAMA,
+            AIProvider.RULE_BASED -> flowOf(
+                StreamingResponse.Error("Provider not available in repository: $provider")
             )
         }
     }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -39,9 +40,15 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -52,6 +59,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.vijay.tadashi.core.ai.AIState
+import com.vijay.tadashi.core.ai.streaming.StreamingState
+import com.vijay.tadashi.presentation.markdown.MarkdownMessage
 import com.vijay.tadashi.presentation.chat.Sender
 import com.vijay.tadashi.presentation.navigation.Screen
 import com.vijay.tadashi.presentation.voice.VoiceEvents
@@ -68,10 +77,37 @@ fun HomeScreen(
     val uiState by voiceViewModel.uiState.collectAsStateWithLifecycle()
     val events by voiceViewModel.events.collectAsStateWithLifecycle()
     val aiState by voiceViewModel.aiState.collectAsStateWithLifecycle()
-    val isThinking = aiState is AIState.Loading
+    val streamingState by voiceViewModel.streamingState.collectAsStateWithLifecycle()
+    val isStreaming by voiceViewModel.isStreaming.collectAsStateWithLifecycle()
+    val streamedText by voiceViewModel.streamedText.collectAsStateWithLifecycle()
+    val isThinking = aiState is AIState.Loading || isStreaming
+    val showStreamingBubble = isStreaming || (streamingState is StreamingState.Cancelled && streamedText.isNotBlank())
 
     val lazyListState = rememberLazyListState()
-    val shouldScrollToEnd by remember { derivedStateOf { uiState.chatHistory.size } }
+    val shouldScrollToEnd by remember {
+        derivedStateOf { uiState.chatHistory.size to streamedText.length }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "streaming")
+    val dotsPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 3.99f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "dots"
+    )
+    val cursorPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 600, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cursor"
+    )
+    val showCursor = cursorPhase > 0.5f
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -88,8 +124,10 @@ fun HomeScreen(
     }
 
     LaunchedEffect(key1 = shouldScrollToEnd) {
-        if (uiState.chatHistory.isNotEmpty()) {
-            lazyListState.animateScrollToItem(uiState.chatHistory.lastIndex)
+        val extraItem = if (showStreamingBubble) 1 else 0
+        val totalItems = uiState.chatHistory.size + extraItem
+        if (totalItems > 0) {
+            lazyListState.animateScrollToItem(totalItems - 1)
         }
     }
 
@@ -178,15 +216,6 @@ fun HomeScreen(
                         textAlign = TextAlign.Center
                     )
                 }
-            if (isThinking) {
-                Text(
-                    text = "TADASHI is thinking...",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    textAlign = TextAlign.Center
-                )
-            }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -213,15 +242,57 @@ fun HomeScreen(
                                         MaterialTheme.colorScheme.secondaryContainer
                                 )
                             ) {
-                                Text(
-                                    text = chatMessage.text,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (chatMessage.sender == Sender.USER)
-                                        MaterialTheme.colorScheme.onPrimary
-                                    else
-                                        MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.padding(16.dp)
-                                )
+                                val contentColor = if (chatMessage.sender == Sender.USER) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                }
+
+                                if (chatMessage.sender == Sender.ASSISTANT) {
+                                    MarkdownMessage(
+                                        markdown = chatMessage.text,
+                                        modifier = Modifier.padding(16.dp),
+                                        textColor = contentColor
+                                    )
+                                } else {
+                                    Text(
+                                        text = chatMessage.text,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = contentColor,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (showStreamingBubble) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(end = 32.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                ) {
+                                    val dots = ".".repeat(dotsPhase.toInt())
+                                    val streamingText = when (streamingState) {
+                                        is StreamingState.Thinking -> "TADASHI is thinking$dots"
+                                        is StreamingState.Streaming -> streamedText + if (showCursor) "▌" else ""
+                                        else -> streamedText
+                                    }
+
+                                    MarkdownMessage(
+                                        markdown = streamingText,
+                                        modifier = Modifier.padding(16.dp),
+                                        textColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
                             }
                         }
                     }
@@ -249,9 +320,13 @@ fun HomeScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 IconButton(
-                    enabled = !isThinking && uiState.userInput.isNotBlank(),
+                    enabled = (isStreaming || uiState.userInput.isNotBlank()) && !uiState.isListening,
                     onClick = {
-                        voiceViewModel.submitUserMessage(uiState.userInput)
+                        if (isStreaming) {
+                            voiceViewModel.cancelStreaming()
+                        } else {
+                            voiceViewModel.submitUserMessage(uiState.userInput)
+                        }
                     },
                     modifier = Modifier
                         .size(56.dp)
@@ -261,8 +336,8 @@ fun HomeScreen(
                         )
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.Send,
-                        contentDescription = "Send",
+                        imageVector = if (isStreaming) Icons.Filled.Stop else Icons.Filled.Send,
+                        contentDescription = if (isStreaming) "Stop" else "Send",
                         tint = MaterialTheme.colorScheme.onPrimary
                     )
                 }

@@ -2,6 +2,12 @@ package com.vijay.tadashi.core.ai.gemini.network
 
 import android.util.Log
 import com.vijay.tadashi.core.ai.AIConfiguration
+import com.vijay.tadashi.core.ai.streaming.TextChunkStreamer
+import com.vijay.tadashi.core.ai.streaming.StreamingResponse
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import java.io.IOException
@@ -15,7 +21,9 @@ import javax.inject.Inject
  */
 class GeminiService @Inject constructor(
     private val api: GeminiApi,
-    private val json: Json
+    private val json: Json,
+    private val mapper: GeminiMapper,
+    private val textChunkStreamer: TextChunkStreamer
 ) {
     /**
      * Executes a Gemini "generateContent" request for the configured model.
@@ -89,6 +97,46 @@ class GeminiService @Inject constructor(
         }
     }
 
+    fun generateContentStream(
+        request: GeminiGenerateContentRequest,
+        configuration: AIConfiguration
+    ): Flow<StreamingResponse> {
+        return flow {
+            Log.d(STREAM_TAG, "Streaming started")
+
+            try {
+                val result = generateContent(
+                    request = request,
+                    configuration = configuration
+                )
+
+                when (result) {
+                    is GeminiServiceResult.Error -> {
+                        emit(StreamingResponse.Error(result.message))
+                        return@flow
+                    }
+
+                    is GeminiServiceResult.Success -> {
+                        val fullText = mapper.extractText(result.response)
+                        if (fullText.isNullOrBlank()) {
+                            emit(StreamingResponse.Error("Gemini returned an empty response"))
+                            return@flow
+                        }
+
+                        emitAll(
+                            textChunkStreamer.streamText(fullText)
+                        )
+
+                        Log.d(STREAM_TAG, "Streaming finished (totalSize=${fullText.length})")
+                    }
+                }
+            } catch (e: CancellationException) {
+                Log.d(STREAM_TAG, "Cancelled")
+                throw e
+            }
+        }
+    }
+
     private fun parseServerErrorMessage(errorBody: String?): String? {
         if (errorBody.isNullOrBlank()) return null
 
@@ -111,6 +159,7 @@ class GeminiService @Inject constructor(
 
     private companion object {
         private const val TAG = "TADASHI-GEMINI"
+        private const val STREAM_TAG = "TADASHI-STREAM"
     }
 }
 

@@ -59,7 +59,7 @@ class GeminiMapper @Inject constructor() {
         }
     }
 
-    private fun extractText(response: GeminiGenerateContentResponse): String? {
+    fun extractText(response: GeminiGenerateContentResponse): String? {
         val firstCandidate = response.candidates.firstOrNull() ?: return null
         val content = firstCandidate.content ?: return null
         val firstPart = content.parts.firstOrNull() ?: return null

@@ -4,6 +4,8 @@ import com.vijay.tadashi.core.ai.AIConfiguration
 import com.vijay.tadashi.core.ai.AIProvider
 import com.vijay.tadashi.core.ai.AIResult
 import com.vijay.tadashi.core.ai.conversation.ConversationHistory
+import com.vijay.tadashi.core.ai.streaming.StreamingResponse
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Data boundary for remote/local AI providers.
@@ -21,4 +23,11 @@ interface AIRepository {
         latestUserMessage: String,
         configuration: AIConfiguration
     ): AIResult
+
+    fun streamResponse(
+        provider: AIProvider,
+        history: ConversationHistory,
+        latestUserMessage: String,
+        configuration: AIConfiguration
+    ): Flow<StreamingResponse>
 }

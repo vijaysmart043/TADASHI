@@ -13,6 +13,8 @@ import com.vijay.tadashi.core.ai.gemini.network.GeminiService
 import com.vijay.tadashi.core.logger.Logger
 import com.vijay.tadashi.core.ai.repository.AIRepository
 import com.vijay.tadashi.core.ai.repository.AIRepositoryImpl
+import com.vijay.tadashi.core.ai.streaming.SimulatedTextChunkStreamer
+import com.vijay.tadashi.core.ai.streaming.TextChunkStreamer
 import com.vijay.tadashi.core.voice.SpeechRecognizerManager
 import com.vijay.tadashi.core.voice.TextToSpeechManager
 import android.util.Log
@@ -92,6 +94,12 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideTextChunkStreamer(
+        impl: SimulatedTextChunkStreamer
+    ): TextChunkStreamer = impl
+
+    @Provides
+    @Singleton
     fun provideOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .addInterceptor { chain ->
@@ -141,11 +149,15 @@ object AppModule {
     @Singleton
     fun provideGeminiService(
         api: GeminiApi,
-        json: Json
+        json: Json,
+        mapper: com.vijay.tadashi.core.ai.gemini.network.GeminiMapper,
+        textChunkStreamer: com.vijay.tadashi.core.ai.streaming.TextChunkStreamer
     ): GeminiService {
         return GeminiService(
             api = api,
-            json = json
+            json = json,
+            mapper = mapper,
+            textChunkStreamer = textChunkStreamer
         )
     }
 

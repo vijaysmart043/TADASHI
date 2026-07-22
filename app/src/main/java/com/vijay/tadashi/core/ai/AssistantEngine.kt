@@ -1,6 +1,8 @@
 package com.vijay.tadashi.core.ai
 
 import com.vijay.tadashi.core.ai.conversation.ConversationHistory
+import com.vijay.tadashi.core.ai.streaming.StreamingResponse
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Abstraction used by the presentation layer to generate an assistant response.
@@ -17,4 +19,9 @@ interface AssistantEngine {
         history: ConversationHistory,
         latestUserMessage: String
     ): AIResult
+
+    fun streamResponse(
+        history: ConversationHistory,
+        latestUserMessage: String
+    ): Flow<StreamingResponse>
 }

@@ -7,14 +7,20 @@ import com.vijay.tadashi.core.ai.AssistantEngine
 import com.vijay.tadashi.core.ai.AIState
 import com.vijay.tadashi.core.ai.conversation.ConversationHistory
 import com.vijay.tadashi.core.ai.conversation.ConversationManager
+import com.vijay.tadashi.core.ai.streaming.StreamingManager
+import com.vijay.tadashi.core.ai.streaming.StreamingState
 import com.vijay.tadashi.core.voice.SpeechRecognizerManager
 import com.vijay.tadashi.core.voice.TextToSpeechManager
 import com.vijay.tadashi.presentation.chat.ChatMessage
 import com.vijay.tadashi.presentation.chat.Sender
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -28,7 +34,8 @@ class VoiceViewModel @Inject constructor(
     private val speechRecognizerManager: SpeechRecognizerManager,
     private val textToSpeechManager: TextToSpeechManager,
     private val assistantEngine: AssistantEngine,
-    private val conversationManager: ConversationManager
+    private val conversationManager: ConversationManager,
+    private val streamingManager: StreamingManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(VoiceUiState())
@@ -39,6 +46,23 @@ class VoiceViewModel @Inject constructor(
 
     private val _aiState = MutableStateFlow<AIState>(AIState.Idle)
     val aiState: StateFlow<AIState> = _aiState.asStateFlow()
+
+    val streamingState: StateFlow<StreamingState> = streamingManager.state
+
+    val isStreaming: StateFlow<Boolean> = streamingState
+        .map { it is StreamingState.Thinking || it is StreamingState.Streaming }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val streamedText: StateFlow<String> = streamingState
+        .map {
+            when (it) {
+                is StreamingState.Streaming -> it.text
+                is StreamingState.Completed -> it.text
+                is StreamingState.Cancelled -> it.text
+                else -> ""
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     init {
         setupSpeechRecognizerCallbacks()
@@ -92,6 +116,8 @@ class VoiceViewModel @Inject constructor(
         Log.d("TADASHI-VOICE", "submitUserMessage() called with: $text")
         if (text.isBlank()) return
 
+        streamingManager.cancel()
+
         conversationManager.addUserMessage(text)
 
         val userMessage = ChatMessage(text = text, sender = Sender.USER)
@@ -106,38 +132,71 @@ class VoiceViewModel @Inject constructor(
                 messages = if (currentHistory.isNotEmpty()) currentHistory.dropLast(1) else emptyList()
             )
 
-            val result = assistantEngine.generateResponse(
-                history = historyWithoutLatest,
-                latestUserMessage = text
+            streamingManager.start(
+                scope = viewModelScope,
+                stream = assistantEngine.streamResponse(
+                    history = historyWithoutLatest,
+                    latestUserMessage = text
+                )
             )
 
-            if (result.success) {
-                Log.d("TADASHI-VOICE", "Assistant response: ${result.text}")
-                conversationManager.addAssistantMessage(result.text)
-                val assistantMessage = ChatMessage(text = result.text, sender = Sender.ASSISTANT)
-                _uiState.value = _uiState.value.copy(chatHistory = _uiState.value.chatHistory + assistantMessage)
+            val terminalState = streamingManager.state.first {
+                it is StreamingState.Completed || it is StreamingState.Error || it is StreamingState.Cancelled
+            }
 
-                Log.d("TADASHI-VOICE", "TTS started")
-                textToSpeechManager.speak(result.text)
+            when (terminalState) {
+                is StreamingState.Completed -> {
+                    val finalText = terminalState.text
+                    Log.d("TADASHI-VOICE", "Assistant response: $finalText")
 
-                _aiState.value = AIState.Success(result)
-            } else {
-                val rawMessage = result.error ?: "AI request failed"
-                val isGeminiApiKeyMissing =
-                    result.provider == com.vijay.tadashi.core.ai.AIProvider.GEMINI &&
-                        rawMessage.contains("api key", ignoreCase = true)
-                val message = if (isGeminiApiKeyMissing) "API key required" else rawMessage
+                    conversationManager.addAssistantMessage(finalText)
+                    val assistantMessage = ChatMessage(text = finalText, sender = Sender.ASSISTANT)
+                    _uiState.value = _uiState.value.copy(chatHistory = _uiState.value.chatHistory + assistantMessage)
 
-                Log.e("TADASHI-VOICE", "Assistant error: $message")
-                _aiState.value = AIState.Error(message = message, provider = result.provider)
+                    Log.d("TADASHI-VOICE", "TTS started")
+                    textToSpeechManager.speak(finalText)
 
-                _events.value = if (isGeminiApiKeyMissing) {
-                    VoiceEvents.NavigateToSettings(message)
-                } else {
-                    VoiceEvents.ShowToast(message)
+                    _aiState.value = AIState.Success(
+                        com.vijay.tadashi.core.ai.AIResult(
+                            text = finalText,
+                            success = true,
+                            provider = com.vijay.tadashi.core.ai.AIProvider.GEMINI
+                        )
+                    )
                 }
+
+                is StreamingState.Error -> {
+                    val rawMessage = terminalState.message
+                    val isGeminiApiKeyMissing = rawMessage.contains("api key", ignoreCase = true)
+                    val message = if (isGeminiApiKeyMissing) "API key required" else rawMessage
+
+                    Log.e("TADASHI-VOICE", "Assistant error: $message")
+                    _aiState.value = AIState.Error(
+                        message = message,
+                        provider = com.vijay.tadashi.core.ai.AIProvider.GEMINI
+                    )
+                    _events.value = if (isGeminiApiKeyMissing) {
+                        VoiceEvents.NavigateToSettings(message)
+                    } else {
+                        VoiceEvents.ShowToast(message)
+                    }
+                }
+
+                is StreamingState.Cancelled -> {
+                    _aiState.value = AIState.Idle
+                }
+
+                else -> {}
+            }
+
+            if (terminalState !is StreamingState.Cancelled) {
+                streamingManager.reset()
             }
         }
+    }
+
+    fun cancelStreaming() {
+        streamingManager.cancel()
     }
 
     fun onUserInputChange(text: String) {
