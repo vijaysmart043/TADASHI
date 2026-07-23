@@ -1,6 +1,8 @@
 package com.vijay.tadashi.core.tools.brightness
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import com.vijay.tadashi.core.tools.ToolsLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -8,13 +10,30 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.roundToInt
 
-@Singleton
-class BrightnessController @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
-    fun canWriteSettings(): Boolean = Settings.System.canWrite(context)
+interface BrightnessController {
+    fun canWriteSettings(): Boolean
+    fun requestWriteSettingsPermission()
+    fun getBrightnessPercent(): Result<Int>
+    fun setBrightnessPercent(targetPercent: Int): Result<Int>
+}
 
-    fun getBrightnessPercent(): Result<Int> {
+@Singleton
+class AndroidBrightnessController @Inject constructor(
+    @ApplicationContext private val context: Context
+) : BrightnessController {
+    override fun canWriteSettings(): Boolean = Settings.System.canWrite(context)
+
+    override fun requestWriteSettingsPermission() {
+        runCatching {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                Uri.parse("package:${context.packageName}")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        }
+    }
+
+    override fun getBrightnessPercent(): Result<Int> {
         return runCatching {
             val value = Settings.System.getInt(
                 context.contentResolver,
@@ -26,7 +45,7 @@ class BrightnessController @Inject constructor(
         }
     }
 
-    fun setBrightnessPercent(targetPercent: Int): Result<Int> {
+    override fun setBrightnessPercent(targetPercent: Int): Result<Int> {
         return runCatching {
             if (!canWriteSettings()) {
                 throw SecurityException("WRITE_SETTINGS not granted")
@@ -63,4 +82,3 @@ class BrightnessController @Inject constructor(
         return (raw.coerceIn(0, 255) / 255.0 * 100.0).roundToInt().coerceIn(0, 100)
     }
 }
-
