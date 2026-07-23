@@ -1,45 +1,72 @@
 package com.vijay.tadashi.core.ai.planner
 
 import com.vijay.tadashi.core.ai.conversation.ConversationHistory
-import com.vijay.tadashi.core.tools.ToolRequest
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.Locale
 
 @Singleton
-class AIToolPlanner @Inject constructor() {
-    private val rules: List<PlannerRule> = listOf(
-        OpenAppRule(),
-        FlashlightRule()
-    )
-
+class AIToolPlanner @Inject constructor(
+    private val classifier: IntentClassifier,
+    private val parameterExtractor: ParameterExtractor
+) {
     fun plan(
         history: ConversationHistory,
         latestUserMessage: String
     ): PlannerResult {
+        val startMs = System.currentTimeMillis()
         PlannerLogger.d("Planner started")
+        PlannerLogger.d("Input: $latestUserMessage")
 
         val normalized = normalize(latestUserMessage)
-        val match = rules.firstNotNullOfOrNull { rule ->
-            rule.match(history = history, normalizedMessage = normalized)?.let { decision ->
-                PlannerLogger.d("Matched ${rule.id}")
-                PlannerResult(
-                    decision = decision,
-                    matchedRuleId = rule.id,
-                    normalizedMessage = normalized
-                )
-            }
+        val segments = MultiActionSegmenter.segment(normalized).map { seg ->
+            seg.copy(text = PlannerMessageRewriter.rewriteSegment(history, seg.text))
         }
 
-        if (match != null) {
-            PlannerLogger.d("Detected Tool Request")
-            return match
+        PlannerLogger.d("Segments: ${segments.size}")
+        segments.forEachIndexed { idx, seg ->
+            PlannerLogger.d("Segment[${idx + 1}] (${seg.connectorBefore}): ${seg.text}")
         }
 
-        PlannerLogger.d("Detected Chat Request")
+        val plan = buildExecutionPlan(history = history, segments = segments)
+        val primaryIntent = plan?.actions?.firstOrNull()?.intent
+        val intentResult = if (primaryIntent != null) {
+            IntentResult(
+                intent = primaryIntent,
+                confidence = plan.actions.minOf { it.confidence },
+                reason = "Multi-step plan (${plan.actions.size} actions)"
+            )
+        } else {
+            classifier.classify(
+                history = history,
+                normalizedMessage = segments.firstOrNull()?.text ?: normalized
+            )
+        }
+
+        PlannerLogger.d("Intent: ${intentResult.intent}")
+        PlannerLogger.d("Confidence: ${"%.2f".format(intentResult.confidence)}")
+        PlannerLogger.d("Reason: ${intentResult.reason}")
+
+        val decision = if (plan != null && plan.actions.isNotEmpty()) {
+            PlannerDecision.Tool(structuredOutput = buildStructuredPlanJson(plan.actions))
+        } else {
+            PlannerDecision.ContinueToGemini
+        }
+        when (decision) {
+            is PlannerDecision.Tool -> PlannerLogger.d("Decision: TOOL")
+            PlannerDecision.ContinueToGemini -> PlannerLogger.d("Decision: GEMINI")
+        }
+
+        val elapsed = System.currentTimeMillis() - startMs
+        PlannerLogger.d("Action Count: ${plan?.actions?.size ?: 0}")
+        PlannerLogger.d("Total Planning Time: ${elapsed}ms")
+
         return PlannerResult(
-            decision = PlannerDecision.ContinueToGemini,
-            matchedRuleId = null,
-            normalizedMessage = normalized
+            intentResult = intentResult,
+            decision = decision,
+            normalizedMessage = normalized,
+            executionPlan = plan,
+            planningTimeMs = elapsed
         )
     }
 
@@ -51,78 +78,164 @@ class AIToolPlanner @Inject constructor() {
             .trim('.', '!', '?', ',', ':', ';')
     }
 
-    private class OpenAppRule : PlannerRule {
-        override val id: String = "OPEN_APP"
+    private data class StepCandidate(
+        val segment: String,
+        val connectorBefore: MultiActionSegmenter.Connector,
+        val intentResult: IntentResult,
+        val extraction: ParameterExtraction
+    )
 
-        private val openRegex = Regex("^(open|launch|start)\\s+(the\\s+)?(.+)$")
+    private fun buildExecutionPlan(
+        history: ConversationHistory,
+        segments: List<MultiActionSegmenter.ActionSegment>
+    ): ExecutionPlan? {
+        val supportedTools = setOf(
+            "OPEN_APP",
+            "FLASHLIGHT",
+            "BRIGHTNESS",
+            "VOLUME"
+        )
 
-        override fun match(
-            history: ConversationHistory,
-            normalizedMessage: String
-        ): PlannerDecision.Tool? {
-            val match = openRegex.find(normalizedMessage) ?: return null
-            val app = match.groupValues.getOrNull(3)
-                ?.trim()
-                ?.trim('.', '!', '?', ',', ':', ';')
-                ?.takeIf { it.isNotBlank() }
-                ?: return null
+        val candidates = mutableListOf<StepCandidate>()
+        var previousIntent: IntentCategory? = null
 
-            return PlannerDecision.Tool(
-                request = ToolRequest(
-                    toolId = "OPEN_APP",
-                    arguments = mapOf("app" to app),
-                    caller = "PLANNER",
-                    timestampMs = System.currentTimeMillis()
+        for (segment in segments) {
+            val repaired = repairImplicitSegment(segment.text, previousIntent)
+            val intentResult = classifier.classify(history = history, normalizedMessage = repaired)
+            if (intentResult.confidence < PlannerConfig.TOOL_CONFIDENCE_THRESHOLD) {
+                return null
+            }
+
+            val extraction = parameterExtractor.extract(
+                normalizedMessage = repaired,
+                intentResult = intentResult
+            ) ?: return null
+
+            if (extraction.toolId !in supportedTools) return null
+
+            ParameterLogger.d(
+                "Extracted tool=${extraction.toolId} args=${extraction.arguments} reason=${extraction.reason}"
+            )
+
+            candidates.add(
+                StepCandidate(
+                    segment = repaired,
+                    connectorBefore = segment.connectorBefore,
+                    intentResult = intentResult,
+                    extraction = extraction
                 )
             )
+
+            previousIntent = intentResult.intent
+        }
+
+        val resolved = resolveConflicts(candidates)
+        val actions = resolved.mapIndexed { idx, step ->
+            PlannedAction(
+                order = idx + 1,
+                intent = step.intentResult.intent,
+                toolId = step.extraction.toolId,
+                confidence = step.intentResult.confidence,
+                parameters = step.extraction.arguments,
+                reason = listOf(step.intentResult.reason, step.extraction.reason).joinToString(separator = " | "),
+                optional = false
+            )
+        }
+
+        return ExecutionPlan(actions = actions)
+    }
+
+    private fun repairImplicitSegment(
+        segment: String,
+        previousIntent: IntentCategory?
+    ): String {
+        val s = segment.trim()
+        if (s.isBlank() || previousIntent == null) return s
+
+        val startsWithOpenVerb = Regex("^(open|launch|start|run|bring up)\\s+").containsMatchIn(s)
+        val startsWithDeviceVerb = Regex("^(set|increase|decrease|reduce|lower|raise|mute)\\s+").containsMatchIn(s)
+
+        return when {
+            previousIntent == IntentCategory.OPEN_APP && !startsWithOpenVerb && !startsWithDeviceVerb ->
+                "open $s"
+
+            previousIntent == IntentCategory.FLASHLIGHT && (s == "on" || s == "off" || s == "toggle") ->
+                "flashlight $s"
+
+            previousIntent == IntentCategory.DEVICE_CONTROL && !startsWithDeviceVerb &&
+                (s.startsWith("volume") || s.startsWith("brightness")) ->
+                "set $s"
+
+            else -> s
         }
     }
 
-    private class FlashlightRule : PlannerRule {
-        override val id: String = "FLASHLIGHT"
-
-        private val onPatterns = listOf(
-            Regex("^turn on (the )?(flashlight|torch|light)$"),
-            Regex("^(flashlight|torch|light) on$"),
-            Regex("^switch on (the )?(flashlight|torch|light)$")
-        )
-
-        private val offPatterns = listOf(
-            Regex("^turn off (the )?(flashlight|torch|light)$"),
-            Regex("^(flashlight|torch|light) off$"),
-            Regex("^switch off (the )?(flashlight|torch|light)$")
-        )
-
-        private val togglePatterns = listOf(
-            Regex("^toggle (the )?(flashlight|torch|light)$")
-        )
-
-        override fun match(
-            history: ConversationHistory,
-            normalizedMessage: String
-        ): PlannerDecision.Tool? {
-            val action = when {
-                togglePatterns.any { it.matches(normalizedMessage) } -> "TOGGLE"
-                onPatterns.any { it.matches(normalizedMessage) } -> "ON"
-                offPatterns.any { it.matches(normalizedMessage) } -> "OFF"
-                normalizedMessage.contains("toggle") && mentionsLight(normalizedMessage) -> "TOGGLE"
-                normalizedMessage.contains("turn on") && mentionsLight(normalizedMessage) -> "ON"
-                normalizedMessage.contains("turn off") && mentionsLight(normalizedMessage) -> "OFF"
-                else -> null
-            } ?: return null
-
-            return PlannerDecision.Tool(
-                request = ToolRequest(
-                    toolId = "FLASHLIGHT",
-                    arguments = mapOf("action" to action),
-                    caller = "PLANNER",
-                    timestampMs = System.currentTimeMillis()
+    private fun resolveConflicts(candidates: List<StepCandidate>): List<StepCandidate> {
+        val out = mutableListOf<StepCandidate>()
+        for (current in candidates) {
+            val prev = out.lastOrNull()
+            if (prev != null &&
+                current.connectorBefore == MultiActionSegmenter.Connector.AND &&
+                isConflict(prev, current)
+            ) {
+                out.removeLast()
+                out.add(
+                    current.copy(
+                        intentResult = current.intentResult.copy(
+                            reason = "${current.intentResult.reason} | Conflict resolved: replaced previous"
+                        )
+                    )
                 )
-            )
+            } else {
+                out.add(current)
+            }
         }
+        return out
+    }
 
-        private fun mentionsLight(message: String): Boolean {
-            return message.contains("flashlight") || message.contains("torch") || message.contains("light")
+    private fun isConflict(a: StepCandidate, b: StepCandidate): Boolean {
+        if (a.extraction.toolId != b.extraction.toolId) return false
+
+        val toolId = a.extraction.toolId
+        val aAction = a.extraction.arguments["action"]?.uppercase()
+        val bAction = b.extraction.arguments["action"]?.uppercase()
+
+        return when (toolId) {
+            "FLASHLIGHT" -> (aAction == "ON" && bAction == "OFF") || (aAction == "OFF" && bAction == "ON")
+            "BRIGHTNESS",
+            "VOLUME" -> {
+                val aValue = a.extraction.arguments["value"]
+                val bValue = b.extraction.arguments["value"]
+                when {
+                    aAction == "SET" && bAction == "SET" && aValue != null && bValue != null && aValue != bValue -> true
+                    aAction == "INCREASE" && bAction == "DECREASE" -> true
+                    aAction == "DECREASE" && bAction == "INCREASE" -> true
+                    else -> false
+                }
+            }
+
+            else -> false
         }
+    }
+
+    private fun buildStructuredPlanJson(actions: List<PlannedAction>): String {
+        val stepsJson = actions.joinToString(separator = ",") { action ->
+            val argsJson = action.parameters.entries.joinToString(separator = ",") { (k, v) ->
+                "\"${escapeJson(k)}\":\"${escapeJson(v)}\""
+            }
+
+            val confidence = String.format(Locale.US, "%.3f", action.confidence)
+            """{"order":${action.order},"intent":"${escapeJson(action.intent.name)}","tool":"${escapeJson(action.toolId)}","confidence":$confidence,"reason":"${escapeJson(action.reason)}","optional":${action.optional},"arguments":{$argsJson}}"""
+        }
+        return """{"version":"2.0","steps":[$stepsJson]}"""
+    }
+
+    private fun escapeJson(raw: String): String {
+        return raw
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
     }
 }

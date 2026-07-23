@@ -6,9 +6,11 @@ import com.vijay.tadashi.core.ai.planner.PlannerDecision
 import com.vijay.tadashi.core.ai.planner.PlannerLogger
 import com.vijay.tadashi.core.ai.conversation.ConversationHistory
 import com.vijay.tadashi.core.ai.streaming.StreamingResponse
+import com.vijay.tadashi.core.tools.ToolParser
 import com.vijay.tadashi.core.tools.ToolExecutor
 import com.vijay.tadashi.core.tools.ToolResult
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import javax.inject.Inject
@@ -23,6 +25,7 @@ class ProviderAssistantEngine @Inject constructor(
     private val ruleBasedAssistantEngine: RuleBasedAssistantEngine,
     private val geminiAssistantEngine: GeminiAssistantEngine,
     private val planner: AIToolPlanner,
+    private val toolParser: ToolParser,
     private val toolExecutor: ToolExecutor
 ) : AssistantEngine {
 
@@ -52,8 +55,52 @@ class ProviderAssistantEngine @Inject constructor(
                 when (val decision = plan.decision) {
                     is PlannerDecision.Tool -> {
                         PlannerLogger.d("Routing to ToolExecutor")
-                        val toolResult = toolExecutor.execute(decision.request)
-                        toolResult.toAIResult(provider = provider)
+                        val steps = toolParser.parsePlan(
+                            structuredOutput = decision.structuredOutput,
+                            caller = "PLANNER",
+                            timestampMs = System.currentTimeMillis()
+                        )
+
+                        if (steps.isNullOrEmpty()) {
+                            PlannerLogger.d("Routing to Gemini")
+                            geminiAssistantEngine.generateResponse(
+                                history = history,
+                                latestUserMessage = latestUserMessage
+                            )
+                        } else {
+                            val messages = mutableListOf<String>()
+                            var failed: ToolResult? = null
+
+                            for (step in steps) {
+                                PlannerLogger.d(
+                                    "Executing step ${step.order}/${steps.size}: ${step.request.toolId} args=${step.request.arguments} optional=${step.optional}"
+                                )
+                                val toolResult = toolExecutor.execute(step.request)
+                                PlannerLogger.d("Execution result: ${toolResult.toDisplayMessage()}")
+
+                                messages.add(toolResult.toDisplayMessage())
+                                if (toolResult !is ToolResult.Success && !step.optional) {
+                                    failed = toolResult
+                                    break
+                                }
+                            }
+
+                            val combined = messages.joinToString(separator = "\n")
+                            if (failed == null) {
+                                AIResult(
+                                    text = combined,
+                                    success = true,
+                                    provider = provider
+                                )
+                            } else {
+                                AIResult(
+                                    text = combined,
+                                    success = false,
+                                    error = combined,
+                                    provider = provider
+                                )
+                            }
+                        }
                     }
 
                     PlannerDecision.ContinueToGemini -> {
@@ -103,9 +150,41 @@ class ProviderAssistantEngine @Inject constructor(
                     is PlannerDecision.Tool -> {
                         flow {
                             PlannerLogger.d("Routing to ToolExecutor")
-                            val toolResult = toolExecutor.execute(decision.request)
-                            val message = toolResult.toDisplayMessage()
-                            emit(StreamingResponse.Completed(message))
+                            val steps = toolParser.parsePlan(
+                                structuredOutput = decision.structuredOutput,
+                                caller = "PLANNER",
+                                timestampMs = System.currentTimeMillis()
+                            )
+
+                            if (steps.isNullOrEmpty()) {
+                                PlannerLogger.d("Routing to Gemini")
+                                emitAll(
+                                    geminiAssistantEngine.streamResponse(
+                                        history = history,
+                                        latestUserMessage = latestUserMessage
+                                    )
+                                )
+                            } else {
+                                val messages = mutableListOf<String>()
+                                var failed: ToolResult? = null
+
+                                for (step in steps) {
+                                    PlannerLogger.d(
+                                        "Executing step ${step.order}/${steps.size}: ${step.request.toolId} args=${step.request.arguments} optional=${step.optional}"
+                                    )
+                                    val toolResult = toolExecutor.execute(step.request)
+                                    PlannerLogger.d("Execution result: ${toolResult.toDisplayMessage()}")
+
+                                    messages.add(toolResult.toDisplayMessage())
+                                    if (toolResult !is ToolResult.Success && !step.optional) {
+                                        failed = toolResult
+                                        break
+                                    }
+                                }
+
+                                val message = messages.joinToString(separator = "\n")
+                                emit(StreamingResponse.Completed(message))
+                            }
                         }
                     }
 

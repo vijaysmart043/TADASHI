@@ -1,7 +1,9 @@
 package com.vijay.tadashi.core.ai.planner
 
 data class PlannerResult(
+    val intentResult: IntentResult,
     val decision: PlannerDecision,
-    val matchedRuleId: String? = null,
-    val normalizedMessage: String
+    val normalizedMessage: String,
+    val executionPlan: ExecutionPlan? = null,
+    val planningTimeMs: Long = 0L
 )
